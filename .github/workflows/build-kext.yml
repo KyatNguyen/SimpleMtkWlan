@@ -1,0 +1,79 @@
+name: Build SimpleMtkWlan kext
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # acidanthera/MacKernelSDK master @ 2026-09-23, pinned for reproducible builds
+  MACKERNELSDK_SHA: 3f750085caa17ec3a7880f11c11bf4f48cd6a164
+
+jobs:
+  build:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch MacKernelSDK
+        run: |
+          git init MacKernelSDK
+          git -C MacKernelSDK fetch --depth 1 https://github.com/acidanthera/MacKernelSDK.git "$MACKERNELSDK_SHA"
+          git -C MacKernelSDK checkout --detach FETCH_HEAD
+          ls MacKernelSDK/Headers MacKernelSDK/Library/x86_64
+
+      - name: Toolchain info
+        run: |
+          sw_vers
+          xcodebuild -version
+          uname -m
+
+      - name: Build
+        run: |
+          set -o pipefail
+          SDK_HEADERS="$GITHUB_WORKSPACE/MacKernelSDK/Headers"
+          xcodebuild \
+            -project SimpleMtkWlan.xcodeproj \
+            -scheme SimpleMtkWlan \
+            -configuration "${{ matrix.configuration }}" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            ARCHS=x86_64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            HEADER_SEARCH_PATHS="$SDK_HEADERS" \
+            KERNEL_EXTENSION_HEADER_SEARCH_PATHS="$SDK_HEADERS" \
+            KERNEL_FRAMEWORK_HEADERS="$SDK_HEADERS" \
+            GIT_COMMIT="-$(git rev-parse --short HEAD)" \
+            build 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      - name: Collect kext
+        run: |
+          set -e
+          KEXT=$(find "$RUNNER_TEMP/dd/Build/Products" -name SimpleMtkWlan.kext -type d | head -n1)
+          test -n "$KEXT"
+          mkdir -p out
+          cp -R "$KEXT" out/
+          cp "$RUNNER_TEMP/build.log" out/build.log
+          BIN=out/SimpleMtkWlan.kext/Contents/MacOS/SimpleMtkWlan
+          file "$BIN"
+          lipo -archs "$BIN"
+          shasum -a 256 "$BIN" | tee out/SHA256.txt
+          plutil -p out/SimpleMtkWlan.kext/Contents/Info.plist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SimpleMtkWlan-${{ matrix.configuration }}-${{ github.sha }}
+          path: out/
+
+      - name: Upload log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ matrix.configuration }}
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: ignore
