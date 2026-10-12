@@ -277,6 +277,20 @@ void SimpleMtkWlan::joinSSID(const char *ssid_name, const char *ssid_pwd)
 void SimpleMtkWlan::associateSSID(const char *ssid, const char *pwd)
 {
     struct ieee80211com *ic = fHalService->get80211Controller();
+    size_t ssidlen = 0;
+    while (ssidlen < IEEE80211_NWID_LEN && ssid[ssidlen] != '\0')
+        ssidlen++;
+    /*
+     * A repeated associate request for the network we are already
+     * associated with used to deauth and rejoin, which tore the link
+     * down. Ignore it while in RUN on the same SSID.
+     */
+    if (ic->ic_state == IEEE80211_S_RUN && ic->ic_bss != NULL &&
+        ic->ic_bss->ni_esslen == ssidlen &&
+        memcmp(ic->ic_bss->ni_essid, ssid, ssidlen) == 0) {
+        XYLog("associate ignored: already associated with this SSID\n");
+        return;
+    }
     if (strlen(pwd) == 0) {
         memcpy(nwid.i_nwid, ssid, 32);
         nwid.i_len = strlen((char *)nwid.i_nwid);
