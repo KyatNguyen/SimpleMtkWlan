@@ -46,8 +46,8 @@
 
 #include "if_mwxreg.h"
 
-/* Diagnostic build: route driver printf through IOLog so it reaches the unified log. */
-#define printf IOLog
+/* Diagnostic build: route driver printf through smtw_log (IOLog + IORegistry copy). */
+#define printf smtw_log
 
 OSDefineMetaClassAndStructors(MtkMwx, MtkHalService)
 

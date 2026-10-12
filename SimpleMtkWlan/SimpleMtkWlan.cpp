@@ -25,6 +25,10 @@
 
 #include <IOKit/IOInterruptController.h>
 #include <IOKit/IOCommandGate.h>
+#include <IOKit/IOLib.h>
+#include <IOKit/IOLocks.h>
+#include <libkern/libkern.h>
+#include <stdarg.h>
 #include <IOKit/network/IONetworkMedium.h>
 #include <net/ethernet.h>
 #include <crypto/sha1.h>
@@ -38,8 +42,62 @@ OSDefineMetaClassAndStructors(CTimeout, OSObject)
 IOWorkLoop *_fWorkloop;
 IOCommandGate *_fCommandGate;
 
+static char gSmtwLog[24576];
+static size_t gSmtwLogLen;
+static IOSimpleLock *gSmtwLogLock;
+
+extern "C" void smtw_log(const char *fmt, ...)
+{
+    char line[512];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    if (n < 0)
+        return;
+    size_t len = strlen(line);
+    IOLog("%s", line);
+    if (gSmtwLogLock == NULL)
+        return;
+    IOInterruptState is = IOSimpleLockLockDisableInterrupt(gSmtwLogLock);
+    if (gSmtwLogLen + len >= sizeof(gSmtwLog)) {
+        /* keep the newest half */
+        size_t keep = sizeof(gSmtwLog) / 2;
+        if (keep > gSmtwLogLen)
+            keep = gSmtwLogLen;
+        memmove(gSmtwLog, gSmtwLog + gSmtwLogLen - keep, keep);
+        gSmtwLogLen = keep;
+    }
+    if (len < sizeof(gSmtwLog) - gSmtwLogLen) {
+        memcpy(gSmtwLog + gSmtwLogLen, line, len);
+        gSmtwLogLen += len;
+        gSmtwLog[gSmtwLogLen] = '\0';
+    }
+    IOSimpleLockUnlockEnableInterrupt(gSmtwLogLock, is);
+}
+
+static void smtw_log_publish(IOService *target)
+{
+    if (target == NULL || gSmtwLogLock == NULL)
+        return;
+    char *copy = (char *)IOMalloc(sizeof(gSmtwLog));
+    if (copy == NULL)
+        return;
+    IOInterruptState is = IOSimpleLockLockDisableInterrupt(gSmtwLogLock);
+    memcpy(copy, gSmtwLog, gSmtwLogLen + 1);
+    IOSimpleLockUnlockEnableInterrupt(gSmtwLogLock, is);
+    OSString *str = OSString::withCString(copy);
+    IOFree(copy, sizeof(gSmtwLog));
+    if (str) {
+        target->setProperty("SimpleMtkWlanLog", str);
+        str->release();
+    }
+}
+
 bool SimpleMtkWlan::init(OSDictionary *properties)
 {
+    if (gSmtwLogLock == NULL)
+        gSmtwLogLock = IOSimpleLockAlloc();
     return super::init(properties);
 }
 
@@ -297,6 +355,15 @@ void SimpleMtkWlan::associateSSID(const char *ssid, const char *pwd)
 }
 
 bool SimpleMtkWlan::start(IOService *provider)
+{
+    XYLog("start begin\n");
+    bool ok = startImpl(provider);
+    XYLog("start %s\n", ok ? "succeeded" : "FAILED");
+    smtw_log_publish(provider);
+    return ok;
+}
+
+bool SimpleMtkWlan::startImpl(IOService *provider)
 {
     int boot_value = 0;
     if (!super::start(provider)) {

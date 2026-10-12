@@ -118,10 +118,20 @@
 
 #define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+/* Diagnostic log: IOLog plus an in-memory copy published to the PCI nub
+ * (property "SimpleMtkWlanLog") so failures can be read with ioreg. */
+void smtw_log(const char *fmt, ...) __printflike(1, 2);
+#ifdef __cplusplus
+}
+#endif
+
 #define XYLog(fmt, x...)\
 do\
 {\
-IOLog("%s: " fmt, "SimpleMtkWlan", ##x);\
+smtw_log("%s: " fmt, "SimpleMtkWlan", ##x);\
 }while(0)
 
 typedef UInt8  u8;
