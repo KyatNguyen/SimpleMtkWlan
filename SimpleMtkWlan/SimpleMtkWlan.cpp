@@ -483,11 +483,11 @@ bool SimpleMtkWlan::startImpl(IOService *provider)
 
 void SimpleMtkWlan::watchdogAction(IOTimerEventSource *timer)
 {
-    static uint32_t ticks;
+    static uint32_t smtwWatchdogTicks;
     struct _ifnet *ifp = getIfp();
     (*ifp->if_watchdog)(ifp);
     /* Diagnostic: refresh the IORegistry log copy about every 2 s. */
-    if ((++ticks % 2) == 0 && gSmtwLogSeq != gSmtwLogPublishedSeq)
+    if ((++smtwWatchdogTicks % 2) == 0 && gSmtwLogSeq != gSmtwLogPublishedSeq)
         smtw_log_publish(pciNub);
     watchdogTimer->setTimeoutMS(kWatchDogTimerPeriod);
 }
