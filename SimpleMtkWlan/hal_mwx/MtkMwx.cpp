@@ -4036,6 +4036,15 @@ mwx_mcu_send_firmware(struct mwx_softc *sc, int cmd, u_char *data,
 	size_t cur_len;
 	int rv;
 
+	/*
+	 * Each chunk is sent in a single mbuf together with the MCU TXD.
+	 * On macOS anything above a 4 KB cluster needs a 16 KB jumbo
+	 * cluster, which may not be available (ENOMEM). Keep chunk + TXD
+	 * within 4 KB, as Linux mt76 does (4096 - headroom).
+	 */
+	if (max_len + sizeof(struct mwx_mcu_txd) > 4096)
+		max_len = 4096 - sizeof(struct mwx_mcu_txd);
+
 	while (len > 0) {
 		cur_len = len;
 		if (cur_len > max_len)
