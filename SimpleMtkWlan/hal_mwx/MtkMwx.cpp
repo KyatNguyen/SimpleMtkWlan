@@ -1516,6 +1516,8 @@ mwx_delete_key(struct ieee80211com *ic, struct ieee80211_node *ni,
 	    DEVNAME(sc), ni, k->k_id, k->k_flags, k->k_cipher);
 
 	mt7921_mcu_sta_key_delete(sc, ni, k);
+	if (k->k_flags & IEEE80211_KEY_SWCRYPTO)
+		ieee80211_delete_key(ic, ni, k);
 }
 
 void
@@ -1527,6 +1529,16 @@ mwx_setkey_task(void *arg)
 
 	while (sc->sc_setkey_tail != sc->sc_setkey_cur) {
 		a = &sc->sc_setkey_arg[sc->sc_setkey_tail];
+		/*
+		 * Experiment: also set up net80211 software crypto for this key.
+		 * TX then encrypts in software (see mwx_tx) and RX frames the
+		 * hardware did not decrypt are decrypted by net80211.
+		 */
+		if ((a->k->k_flags & IEEE80211_KEY_SWCRYPTO) == 0) {
+			int swrv = ieee80211_set_key(&sc->sc_ic, a->ni, a->k);
+			MWX_DEV_LOG(sc, "sw key setup id=%d cipher=%d rv=%d\n",
+			    a->k->k_id, a->k->k_cipher, swrv);
+		}
 		mt7921_mcu_sta_key_update(sc, a->ni, a->k);
 		a->ni = NULL;
 		a->k = NULL;
@@ -1598,7 +1610,7 @@ mwx_tx(struct mwx_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	struct mwx_node *mn = (struct mwx_node *)ni;
 	struct mwx_txwi *mt;
 	struct mt76_txwi *txp;
-	int rv;
+	int rv, swcrypt = 0;
 
 	{
 		struct ieee80211_frame *pwh = mtod(m, struct ieee80211_frame *);
@@ -1608,7 +1620,19 @@ mwx_tx(struct mwx_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 			    ieee80211_get_txkey(&sc->sc_ic, pwh, ni);
 			static uint32_t ccmp_log_count;
 
-			if (k->k_cipher == IEEE80211_CIPHER_CCMP) {
+			if (k->k_flags & IEEE80211_KEY_SWCRYPTO) {
+				m = ieee80211_encrypt(&sc->sc_ic, m, k);
+				if (m == NULL)
+					return ENOBUFS;
+				swcrypt = 1;
+				if (ccmp_log_count < 8) {
+					MWX_DEV_LOG(sc, "tx sw encrypt k_id=%d cipher=%d pn=%llu len=%zu\n",
+					    k->k_id, k->k_cipher,
+					    (unsigned long long)k->k_tsc,
+					    mbuf_pkthdr_len(m));
+					ccmp_log_count++;
+				}
+			} else if (k->k_cipher == IEEE80211_CIPHER_CCMP) {
 				m = mwx_tx_insert_ccmp_hdr(m, k);
 				if (m == NULL)
 					return ENOBUFS;
@@ -1630,6 +1654,9 @@ mwx_tx(struct mwx_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	txp = mt->mt_desc;
 	memset(txp, 0, sizeof(*txp));
 	mt7921_mac_write_txwi(sc, m, ni, txp);
+	/* Already encrypted in software: the MAC must not encrypt again. */
+	if (swcrypt)
+		txp->txwi[3] &= ~htole32(MT_TXD3_PROTECT_FRAME);
 
 	rv = mwx_txwi_enqueue(sc, mt, m);
 	if (rv != 0) {
