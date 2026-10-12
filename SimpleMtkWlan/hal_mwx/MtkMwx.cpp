@@ -996,6 +996,31 @@ mwx_stop(struct ifnet *ifp)
 	splx(s);
 }
 
+/*
+ * Diagnostic: PHY mode / MCS / bandwidth of received frames longer than
+ * 1000 bytes (i.e. data, not beacons), from the group-3 P-RXV word.
+ * Mode: 0 CCK, 1 OFDM, 2 HT mixed, 3 HT greenfield, 4 VHT, 8+ HE.
+ */
+static uint32_t smtw_rxrate_mode[16];
+static uint32_t smtw_rxrate_bw[4];
+static uint32_t smtw_rxrate_sgi;
+static uint8_t smtw_rxrate_maxidx[16];
+
+static void
+smtw_rxrate_account(uint32_t v0)
+{
+	uint32_t mode = (v0 >> 24) & 0xf;
+	uint32_t idx = v0 & 0x7f;
+	uint32_t bw = (v0 >> 12) & 0x7;
+
+	smtw_rxrate_mode[mode]++;
+	if (idx > smtw_rxrate_maxidx[mode])
+		smtw_rxrate_maxidx[mode] = idx;
+	smtw_rxrate_bw[bw & 3]++;
+	if ((v0 >> 15) & 0x3)
+		smtw_rxrate_sgi++;
+}
+
 void
 mwx_watchdog(struct ifnet *ifp)
 {
@@ -1038,6 +1063,32 @@ mwx_watchdog(struct ifnet *ifp)
 	}
 	ifp->if_timer = 0;
 	ieee80211_watchdog(ifp);
+	if (sc != NULL && sc->sc_ic.ic_state == IEEE80211_S_RUN &&
+	    (wd_ticks % 2) == 0) {
+		uint32_t total = 0;
+		int k;
+
+		for (k = 0; k < 16; k++)
+			total += smtw_rxrate_mode[k];
+		if (total > 0) {
+			MWX_DEV_LOG(sc, "rxrate n=%u cck=%u ofdm=%u/max%u "
+			    "ht=%u/max%u vht=%u/max%u he=%u bw20=%u bw40=%u "
+			    "bw80=%u sgi=%u\n", total, smtw_rxrate_mode[0],
+			    smtw_rxrate_mode[1], smtw_rxrate_maxidx[1],
+			    smtw_rxrate_mode[2] + smtw_rxrate_mode[3],
+			    MAX(smtw_rxrate_maxidx[2], smtw_rxrate_maxidx[3]),
+			    smtw_rxrate_mode[4], smtw_rxrate_maxidx[4],
+			    smtw_rxrate_mode[8] + smtw_rxrate_mode[9] +
+			    smtw_rxrate_mode[10] + smtw_rxrate_mode[11],
+			    smtw_rxrate_bw[0], smtw_rxrate_bw[1],
+			    smtw_rxrate_bw[2], smtw_rxrate_sgi);
+			memset(smtw_rxrate_mode, 0, sizeof(smtw_rxrate_mode));
+			memset(smtw_rxrate_maxidx, 0,
+			    sizeof(smtw_rxrate_maxidx));
+			memset(smtw_rxrate_bw, 0, sizeof(smtw_rxrate_bw));
+			smtw_rxrate_sgi = 0;
+		}
+	}
 }
 
 void
@@ -1201,8 +1252,11 @@ mwx_ampdu_rx_start(struct ieee80211com *ic, struct ieee80211_node *ni,
     uint8_t tid)
 {
 	struct mwx_softc *sc = (struct mwx_softc *)ic->ic_softc;
+	static uint32_t refused;
 
-	MWX_DEV_LOG(sc, "addba request tid=%u refused\n", tid);
+	if (refused++ < 8)
+		MWX_DEV_LOG(sc, "addba request tid=%u refused (#%u)\n", tid,
+		    refused);
 	return ENOTSUP;
 }
 
@@ -5559,8 +5613,10 @@ mt7921_mac_fill_rx(struct mwx_softc *sc, struct mbuf *m,
 		num_rxd += 2;
 		rxd += 2;
 
-		v0 = le32toh(rxv[0]); /* XXX not implemented yet */ 
+		v0 = le32toh(rxv[0]);
 		v1 = le32toh(rxv[1]);
+		if (mbuf_len(m) > 1000)
+			smtw_rxrate_account(v0);
 
 		if (rxd1 & MT_RXD1_NORMAL_GROUP_5) {
 			num_rxd += 18;
