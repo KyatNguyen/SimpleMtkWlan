@@ -3312,6 +3312,17 @@ mwx_mcu_rx_event(struct mwx_softc *sc, struct mbuf *m)
 	rxd_seq = rxd->seq;
 	m_adj(m, sizeof(*rxd));
 
+	{
+		/* Diagnostic: trace MCU events once association starts. */
+		static uint32_t ev_log_count;
+
+		if (sc->sc_ic.ic_state >= IEEE80211_S_AUTH && ev_log_count < 200) {
+			MWX_DEV_LOG(sc, "mcu event eid=0x%02x ext=0x%02x seq=%u len=%d\n",
+			    rxd_eid, rxd_ext_eid, rxd_seq, len);
+			ev_log_count++;
+		}
+	}
+
 	switch (rxd_eid) {
 	case MCU_EVENT_SCHED_SCAN_DONE:
 	case MCU_EVENT_SCAN_DONE:
@@ -3324,10 +3335,40 @@ mwx_mcu_rx_event(struct mwx_softc *sc, struct mbuf *m)
 	case MCU_EVENT_BSS_ABSENCE:
 		mt7921_mcu_bss_event(dev, skb);
 		break;
-	case MCU_EVENT_DBG_MSG:
-		mt7921_mcu_debug_msg_event(dev, skb);
-		break;
 #endif
+	case MCU_EVENT_DBG_MSG: {
+		/* Same layout as Linux mt7921_mcu_debug_msg_event(). */
+		struct {
+			uint16_t	id;
+			uint8_t		type;
+			uint8_t		flag;
+			uint32_t	value;
+			uint16_t	len;
+			uint8_t		content[512];
+		} __packed *msg;
+		static uint32_t dbg_log_count;
+
+		if (mbuf_len(m) >= 10 && dbg_log_count < 400) {
+			char text[257];
+			size_t n, i;
+
+			msg = mtod(m, typeof(msg));
+			n = le16toh(msg->len);
+			if (n > mbuf_len(m) - 10)
+				n = mbuf_len(m) - 10;
+			if (n > sizeof(text) - 1)
+				n = sizeof(text) - 1;
+			for (i = 0; i < n; i++) {
+				uint8_t c = msg->content[i];
+				text[i] = (c >= 0x20 && c < 0x7f) ? c : ' ';
+			}
+			text[n] = '\0';
+			MWX_DEV_LOG(sc, "fw dbg type=%u id=%u value=0x%x: %s\n",
+			    msg->type, le16toh(msg->id), le32toh(msg->value), text);
+			dbg_log_count++;
+		}
+		break;
+	}
 	case MCU_EVENT_COREDUMP:
 		/* it makes little sense to write the coredump down */
 		if (!sc->sc_resetting)
