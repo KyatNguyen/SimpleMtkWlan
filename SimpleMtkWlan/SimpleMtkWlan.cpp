@@ -42,8 +42,10 @@ OSDefineMetaClassAndStructors(CTimeout, OSObject)
 IOWorkLoop *_fWorkloop;
 IOCommandGate *_fCommandGate;
 
-static char gSmtwLog[24576];
+static char gSmtwLog[65536];
 static size_t gSmtwLogLen;
+static uint32_t gSmtwLogSeq;
+static uint32_t gSmtwLogPublishedSeq;
 static IOSimpleLock *gSmtwLogLock;
 
 extern "C" void smtw_log(const char *fmt, ...)
@@ -73,6 +75,7 @@ extern "C" void smtw_log(const char *fmt, ...)
         gSmtwLogLen += len;
         gSmtwLog[gSmtwLogLen] = '\0';
     }
+    gSmtwLogSeq++;
     IOSimpleLockUnlockEnableInterrupt(gSmtwLogLock, is);
 }
 
@@ -85,6 +88,7 @@ static void smtw_log_publish(IOService *target)
         return;
     IOInterruptState is = IOSimpleLockLockDisableInterrupt(gSmtwLogLock);
     memcpy(copy, gSmtwLog, gSmtwLogLen + 1);
+    gSmtwLogPublishedSeq = gSmtwLogSeq;
     IOSimpleLockUnlockEnableInterrupt(gSmtwLogLock, is);
     OSString *str = OSString::withCString(copy);
     IOFree(copy, sizeof(gSmtwLog));
@@ -479,8 +483,12 @@ bool SimpleMtkWlan::startImpl(IOService *provider)
 
 void SimpleMtkWlan::watchdogAction(IOTimerEventSource *timer)
 {
+    static uint32_t ticks;
     struct _ifnet *ifp = getIfp();
     (*ifp->if_watchdog)(ifp);
+    /* Diagnostic: refresh the IORegistry log copy about every 2 s. */
+    if ((++ticks % 2) == 0 && gSmtwLogSeq != gSmtwLogPublishedSeq)
+        smtw_log_publish(pciNub);
     watchdogTimer->setTimeoutMS(kWatchDogTimerPeriod);
 }
 
@@ -614,6 +622,7 @@ IOReturn SimpleMtkWlan::disable(IONetworkInterface *netif)
     watchdogTimer->disable();
     fHalService->disable(netif);
     setLinkStatus(kIONetworkLinkValid);
+    smtw_log_publish(pciNub);
     return kIOReturnSuccess;
 }
 
