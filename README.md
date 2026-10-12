@@ -12,6 +12,16 @@ was tested on.
 > access point. It may panic or hang your Mac. Keep a bootable backup EFI (for
 > example a USB stick) before trying it.
 
+> **You need two pieces:**
+> 1. **`SimpleMtkWlan.kext`** (this repository) — the driver, loaded by OpenCore.
+> 2. **`SimpleMTK.app`** — the menu bar client from
+>    [laobamac/SimpleMTKClient](https://github.com/laobamac/SimpleMTKClient).
+>
+> The driver does **not** plug into the macOS Wi-Fi menu or System Settings ->
+> Wi-Fi. Scanning, choosing a network and entering the password are done only
+> in SimpleMTK. Without the client the kext loads but never connects. See
+> [SimpleMTK client app](#simplemtk-client-app-required).
+
 ## Who did the work (please read)
 
 All code changes, debugging and diagnosis on this branch after PR #5, and this
@@ -78,10 +88,60 @@ Prebuilt kexts come from this fork's GitHub Actions workflow
 
 The build tested in the table above is commit `eaedc9e`.
 
-You also need the menu bar client **SimpleMTK** to pick a network:
-[laobamac/SimpleMTKClient](https://github.com/laobamac/SimpleMTKClient). An
-unmodified build is produced by the Actions of
-[KyatNguyen/SimpleMTKClient](https://github.com/KyatNguyen/SimpleMTKClient).
+The client app is downloaded separately, see the next section.
+
+## SimpleMTK client app (required)
+
+SimpleMTK is laobamac's menu bar app (a HeliPort fork) that talks to the kext
+through its IOKit user client. It was used **unmodified** for all testing.
+
+### Get it
+
+laobamac does not publish a prebuilt release, so either:
+
+- **Download a build:** open the
+  [`Build SimpleMTK app` runs](https://github.com/KyatNguyen/SimpleMTKClient/actions/workflows/build-app.yml)
+  of the [KyatNguyen/SimpleMTKClient](https://github.com/KyatNguyen/SimpleMTKClient)
+  fork and download the artifact `SimpleMTK-Release-<commit>` (signed in to
+  GitHub). It contains `SimpleMTK.zip` (x86_64, ad-hoc signed, not notarized)
+  and `SHA256.txt`. That fork only adds this build workflow; the app source is
+  laobamac's. The tested build is commit `4f184e6`,
+  `SimpleMTK.zip` SHA256 `056c526765423f1a862342e29550ff42cfb263e0db0be41f13bd7f0bbecfba5a`.
+- **Or build it yourself** from
+  [laobamac/SimpleMTKClient](https://github.com/laobamac/SimpleMTKClient) with
+  Xcode:
+
+  ```bash
+  xcodebuild -scheme SimpleMTK -configuration Release ARCHS=x86_64 \
+    ONLY_ACTIVE_ARCH=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
+    -derivedDataPath build build
+  ```
+
+### Install
+
+1. Unzip `SimpleMTK.zip` and move `SimpleMTK.app` to `/Applications`.
+2. Open it. The app is not notarized, so macOS 15 blocks the first launch of a
+   copy downloaded with a browser: open System Settings -> Privacy & Security
+   and click **Open Anyway** for SimpleMTK (or remove the quarantine flag with
+   `xattr -dr com.apple.quarantine /Applications/SimpleMTK.app`).
+3. A Wi-Fi icon appears in the menu bar. To start it automatically, use the
+   **Launch At Login** item in the SimpleMTK menu.
+
+### Use
+
+1. Click the SimpleMTK menu bar icon and wait for the network list.
+2. Pick your network, enter the password, and connect **once**. Do not press
+   connect again while it is connecting.
+3. When connected, the connection appears in System Settings -> Network as an
+   **Ethernet** interface (for example `en2`) and gets its address by DHCP.
+4. The menu bar icon reflects whether the Mac has Internet through **any**
+   interface (for example USB tethering), so check `ifconfig en2` if you want
+   to know whether Wi-Fi itself is up.
+5. While connected the network list does not refresh (scanning is disabled in
+   RUN on this branch). Disconnect in SimpleMTK to scan again.
+6. When it is not connected, the client tries your saved networks
+   automatically. If it picks another saved network first, the driver handles
+   that, but the first connection can take longer.
 
 ## Install (OpenCore)
 
@@ -113,9 +173,10 @@ unmodified build is produced by the Actions of
 3. If your EFI hides the Wi-Fi card (for example an SSDT such as
    `SSDT-Disable_Network_RP14.aml` that spoofs its IDs to `ffff:ffff`), disable
    it, otherwise the kext never matches.
-4. Reboot, open **SimpleMTK** from the menu bar, pick your network and connect
-   **once**. The connection shows up as an Ethernet interface in System
-   Settings -> Network.
+4. Install the **SimpleMTK** client app (see
+   [SimpleMTK client app](#simplemtk-client-app-required)), reboot, then pick
+   your network in SimpleMTK and connect **once**. The connection shows up as
+   an Ethernet interface in System Settings -> Network.
 
 Check that the kext attached:
 
