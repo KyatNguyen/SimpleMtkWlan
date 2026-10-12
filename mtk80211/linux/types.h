@@ -121,7 +121,7 @@
 #define XYLog(fmt, x...)\
 do\
 {\
-kprintf("%s: " fmt, "SimpleMtkWlan", ##x);\
+IOLog("%s: " fmt, "SimpleMtkWlan", ##x);\
 }while(0)
 
 typedef UInt8  u8;
