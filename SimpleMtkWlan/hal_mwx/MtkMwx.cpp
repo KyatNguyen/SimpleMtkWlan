@@ -1555,6 +1555,43 @@ mwx_radiotap_attach(struct mwx_softc *sc)
 }
 #endif
 
+/*
+ * Frames are handed to the hardware in 802.11 format. With
+ * MT_TXD3_PROTECT_FRAME the MAC encrypts the payload and appends the
+ * MIC, but the CCMP header (PN, key id) must already be in the frame:
+ * Linux mac80211 inserts it for mt7921 (no GENERATE_IV), OpenBSD iwm
+ * does the same. Without it the AP cannot decrypt anything we send.
+ */
+static struct mbuf *
+mwx_tx_insert_ccmp_hdr(struct mbuf *m, struct ieee80211_key *k)
+{
+	struct ieee80211_frame *wh;
+	u_int hdrlen;
+	uint8_t *ivp;
+
+	wh = mtod(m, struct ieee80211_frame *);
+	hdrlen = ieee80211_get_hdrlen(wh);
+	m = m_prepend(m, IEEE80211_CCMP_HDRLEN, M_DONTWAIT);
+	if (m == NULL)
+		return NULL;
+	m = m_pullup(m, hdrlen + IEEE80211_CCMP_HDRLEN);
+	if (m == NULL)
+		return NULL;
+	memmove(mtod(m, uint8_t *),
+	    mtod(m, uint8_t *) + IEEE80211_CCMP_HDRLEN, hdrlen);
+	ivp = mtod(m, uint8_t *) + hdrlen;
+	k->k_tsc++;
+	ivp[0] = k->k_tsc;
+	ivp[1] = k->k_tsc >> 8;
+	ivp[2] = 0;
+	ivp[3] = k->k_id << 6 | IEEE80211_WEP_EXTIV;
+	ivp[4] = k->k_tsc >> 16;
+	ivp[5] = k->k_tsc >> 24;
+	ivp[6] = k->k_tsc >> 32;
+	ivp[7] = k->k_tsc >> 40;
+	return m;
+}
+
 int
 mwx_tx(struct mwx_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 {
@@ -1562,6 +1599,28 @@ mwx_tx(struct mwx_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	struct mwx_txwi *mt;
 	struct mt76_txwi *txp;
 	int rv;
+
+	{
+		struct ieee80211_frame *pwh = mtod(m, struct ieee80211_frame *);
+
+		if (pwh->i_fc[1] & IEEE80211_FC1_PROTECTED) {
+			struct ieee80211_key *k =
+			    ieee80211_get_txkey(&sc->sc_ic, pwh, ni);
+			static uint32_t ccmp_log_count;
+
+			if (k->k_cipher == IEEE80211_CIPHER_CCMP) {
+				m = mwx_tx_insert_ccmp_hdr(m, k);
+				if (m == NULL)
+					return ENOBUFS;
+				if (ccmp_log_count < 8) {
+					MWX_DEV_LOG(sc, "tx ccmp hdr k_id=%d pn=%llu len=%zu\n",
+					    k->k_id, (unsigned long long)k->k_tsc,
+					    mbuf_pkthdr_len(m));
+					ccmp_log_count++;
+				}
+			}
+		}
+	}
 
 	if ((mt = mwx_txwi_get(sc)) == NULL) {
 		m_freem(m);
