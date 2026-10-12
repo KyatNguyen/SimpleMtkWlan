@@ -1310,6 +1310,15 @@ mwx_newstate_task(void *ptr)
 		if (rv)
 			break;
 		mwx_mcu_set_deep_sleep(sc, 0);
+		/*
+		 * A failed earlier attempt (e.g. auto-join of another saved
+		 * network) leaves a STA record on the same wcid. Firmware then
+		 * rejects the new record (status 0x10003), the WTBL keeps the
+		 * old peer address and RX from the AP is never matched (WLAN
+		 * index 1023), so nothing gets decrypted. Remove the stale
+		 * record first; an error here just means there was none.
+		 */
+		(void)mt7921_mac_sta_update(sc, sc->sc_ic.ic_bss, 0, 0);
 		mt7921_mac_sta_update(sc, sc->sc_ic.ic_bss, 1, 1);
 		break;
 	case IEEE80211_S_ASSOC:
