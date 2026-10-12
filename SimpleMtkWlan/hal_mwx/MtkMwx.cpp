@@ -1923,7 +1923,7 @@ mwx_preinit(struct mwx_softc *sc)
 			ic->ic_channels[chan].ic_flags =
 			    IEEE80211_CHAN_CCK | IEEE80211_CHAN_OFDM |
 			    IEEE80211_CHAN_DYN | IEEE80211_CHAN_2GHZ |
-			    IEEE80211_CHAN_HT;
+			    IEEE80211_CHAN_HT20;
 			/* TODO 40 MHz and 11ac flags */
 		}
 
@@ -1936,8 +1936,13 @@ mwx_preinit(struct mwx_softc *sc)
 			chan = mwx_channels_5ghz[i];
 			ic->ic_channels[chan].ic_freq =
 			    ieee80211_ieee2mhz(chan, IEEE80211_CHAN_5GHZ);
+			/*
+			 * HT20 only: in this net80211 IEEE80211_CHAN_HT also
+			 * includes HT40U/D, which makes mt7921_mcu_chan_bw()
+			 * pick 40 MHz.
+			 */
 			ic->ic_channels[chan].ic_flags = IEEE80211_CHAN_A |
-			    IEEE80211_CHAN_HT;
+			    IEEE80211_CHAN_HT20;
 			/* TODO 40/80 MHz and 11ac flags */
 		}
 	}
