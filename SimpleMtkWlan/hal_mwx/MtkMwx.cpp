@@ -1008,7 +1008,16 @@ mwx_watchdog(struct ifnet *ifp)
 	if (sc != NULL && sc->sc_ic.ic_state >= IEEE80211_S_ASSOC &&
 	    (++wd_ticks % 2) == 0 && wd_lines < 90) {
 		struct mwx_queue *rq = &sc->sc_rxq, *tq = &sc->sc_txq;
+		struct mwx_queue *mq = &sc->sc_txmcuq, *mr = &sc->sc_rxmcuq;
 
+		MWX_DEV_LOG(sc, "wd fw glo=0x%08x mcucmd=0x%08x misc=0x%08x "
+		    "txmcu cpu=%u dma=%u rxmcu cpu=%u dma=%u\n",
+		    mwx_read(sc, MT_WFDMA0_GLO_CFG), mwx_read(sc, MT_MCU_CMD),
+		    mwx_read(sc, MT_CONN_ON_MISC),
+		    mwx_read(sc, mq->mq_regbase + MT_DMA_CPU_IDX),
+		    mwx_read(sc, mq->mq_regbase + MT_DMA_DMA_IDX),
+		    mwx_read(sc, mr->mq_regbase + MT_DMA_CPU_IDX),
+		    mwx_read(sc, mr->mq_regbase + MT_DMA_DMA_IDX));
 		MWX_DEV_LOG(sc, "wd st=%d intr=%u rxdata=%u ena=0x%08x sta=0x%08x "
 		    "lpctl=0x%08x rx cpu=%u dma=%u prod=%u cons=%u "
 		    "tx cpu=%u dma=%u prod=%u cons=%u\n",
@@ -1731,8 +1740,11 @@ mwx_intr(void *arg)
 
 	if (intr & MT_INT_MCU_CMD) {
 		intr_sw = mwx_read(sc, MT_MCU_CMD);
-		if (intr_log_count < 16)
-			MWX_DEV_LOG(sc, "mcu interrupt status=0x%08x\n", intr_sw);
+		if (intr_log_count < 16 ||
+		    (intr_sw & MT_MCU_CMD_ERROR_MASK) != 0)
+			MWX_DEV_LOG(sc, "mcu interrupt status=0x%08x%s\n", intr_sw,
+			    (intr_sw & MT_MCU_CMD_ERROR_MASK) ?
+			    " (firmware error/SER)" : "");
 		/* ack MCU2HOST_SW_INT_STA */
 		mwx_write(sc, MT_MCU_CMD, intr_sw);
 		if (intr_sw & MT_MCU_CMD_WAKE_RX_PCIE)
