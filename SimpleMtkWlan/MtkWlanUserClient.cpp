@@ -367,6 +367,18 @@ IOReturn MtkWlanUserClient::
 sSCAN(OSObject* target, void* data, bool isSet)
 {
     MtkWlanUserClient *that = OSDynamicCast(MtkWlanUserClient, target);
+    struct ieee80211com *ic = that->fDriver->fHalService->get80211Controller();
+    /*
+     * The MCU stopped answering right after a client-triggered hardware
+     * scan while associated. Until background scan in RUN is fixed, keep
+     * the cached results instead of starting a scan while in RUN.
+     */
+    if (ic->ic_state == IEEE80211_S_RUN) {
+        static uint32_t skipped;
+        if (skipped++ < 8)
+            XYLog("scan request ignored while associated (cached results)\n");
+        return kIOReturnSuccess;
+    }
     ieee80211_begin_cache_bgscan(that->fIfp);
     return kIOReturnSuccess;
 }
