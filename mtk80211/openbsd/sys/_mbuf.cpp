@@ -59,6 +59,23 @@ static IOReturn _if_input(OSObject *target, void *arg0, void *arg1, void *arg2, 
         }
         //        XYLog("%s %d 啊啊啊啊 ifq->iface->inputPacket(m) hdr_len=%d len=%d\n", __FUNCTION__, __LINE__, mbuf_pkthdr_len(m), mbuf_len(m));
         isEmpty = false;
+        {
+            /* Diagnostic: dump the start of the first delivered packets. */
+            static uint32_t rx_dump_count;
+            if (rx_dump_count < 16) {
+                uint8_t b[64];
+                size_t plen = mbuf_pkthdr_len(m);
+                size_t n = plen < sizeof(b) ? plen : sizeof(b);
+                char hex[sizeof(b) * 2 + 1];
+                if (mbuf_copydata(m, 0, n, b) == 0) {
+                    for (size_t i = 0; i < n; i++)
+                        snprintf(hex + i * 2, 3, "%02x", b[i]);
+                    hex[n * 2] = '\0';
+                    XYLog("rx deliver #%u len=%zu %s\n", rx_dump_count, plen, hex);
+                }
+                rx_dump_count++;
+            }
+        }
         ifq->iface->inputPacket(m, 0, IONetworkInterface::kInputOptionQueuePacket);
         if (ifq->netStat != NULL) {
             ifq->netStat->inputPackets++;
