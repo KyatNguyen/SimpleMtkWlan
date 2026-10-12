@@ -439,6 +439,8 @@ struct mwx_softc {
 	struct mwx_vif		sc_vif;
 	uint32_t		sc_wcid_mask;
 	uint32_t		sc_intr_mask;
+	uint32_t		sc_intr_count;
+	uint32_t		sc_rxdata_done_count;
 
 	/* mcu */
 	uint32_t		sc_mcu_seq;
@@ -995,6 +997,34 @@ mwx_stop(struct ifnet *ifp)
 void
 mwx_watchdog(struct ifnet *ifp)
 {
+	struct mwx_softc *sc = (struct mwx_softc *)ifp->if_softc;
+	static uint32_t wd_ticks, wd_lines;
+
+	/*
+	 * Diagnostic: every 2 s, while associated, dump DMA ring and power
+	 * state so a stalled RX data ring (no RX, no TX-free after link up)
+	 * can be told apart from lost interrupts or the chip going to sleep.
+	 */
+	if (sc != NULL && sc->sc_ic.ic_state >= IEEE80211_S_ASSOC &&
+	    (++wd_ticks % 2) == 0 && wd_lines < 90) {
+		struct mwx_queue *rq = &sc->sc_rxq, *tq = &sc->sc_txq;
+
+		MWX_DEV_LOG(sc, "wd st=%d intr=%u rxdata=%u ena=0x%08x sta=0x%08x "
+		    "lpctl=0x%08x rx cpu=%u dma=%u prod=%u cons=%u "
+		    "tx cpu=%u dma=%u prod=%u cons=%u\n",
+		    sc->sc_ic.ic_state, sc->sc_intr_count,
+		    sc->sc_rxdata_done_count,
+		    mwx_read(sc, MT_WFDMA0_HOST_INT_ENA),
+		    mwx_read(sc, MT_WFDMA0_HOST_INT_STA),
+		    mwx_read(sc, MT_CONN_ON_LPCTL),
+		    mwx_read(sc, rq->mq_regbase + MT_DMA_CPU_IDX),
+		    mwx_read(sc, rq->mq_regbase + MT_DMA_DMA_IDX),
+		    rq->mq_prod, rq->mq_cons,
+		    mwx_read(sc, tq->mq_regbase + MT_DMA_CPU_IDX),
+		    mwx_read(sc, tq->mq_regbase + MT_DMA_DMA_IDX),
+		    tq->mq_prod, tq->mq_cons);
+		wd_lines++;
+	}
 	ifp->if_timer = 0;
 	ieee80211_watchdog(ifp);
 }
@@ -1675,6 +1705,7 @@ mwx_intr(void *arg)
 
 	mwx_write(sc, MT_WFDMA0_HOST_INT_ENA, 0);
 	intr = mwx_read(sc, MT_WFDMA0_HOST_INT_STA);
+	sc->sc_intr_count++;
 	if (intr == 0) {
 		mwx_write(sc, MT_WFDMA0_HOST_INT_ENA, mask);
 		return 0;
@@ -1715,8 +1746,10 @@ mwx_intr(void *arg)
 		mwx_dma_rx_done(sc, &sc->sc_rxfwdlq);
 	if (intr & MT_INT_RX_DONE_WM2)
 		mwx_dma_rx_done(sc, &sc->sc_rxmcuq);
-	if (intr & MT_INT_RX_DONE_DATA)
+	if (intr & MT_INT_RX_DONE_DATA) {
+		sc->sc_rxdata_done_count++;
 		mwx_dma_rx_done(sc, &sc->sc_rxq);
+	}
 
 	/* TODO power management */
 //	mt76_connac_pm_unref(&dev->mphy, &dev->pm);
