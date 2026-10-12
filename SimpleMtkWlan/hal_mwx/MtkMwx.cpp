@@ -1265,8 +1265,20 @@ mwx_newstate_task(void *ptr)
 
 	switch (ostate) {
 	case IEEE80211_S_RUN:
-		if (nstate != ostate)
-			mwx_mcu_set_deep_sleep(sc, 1);
+		if (nstate != ostate) {
+			/*
+			 * Leaving RUN: remove the BSS and peer from firmware while
+			 * the chip is still in full-power mode. Enabling deep sleep
+			 * here (as before) made the next MCU command, the channel
+			 * switch for AUTH, time out and wedged the MCU. Linux mt76
+			 * removes the station first and only then allows sleep.
+			 */
+			int td_bss = mt7921_mcu_set_associated_bss(sc, 0);
+			int td_sta = ic->ic_bss != NULL ?
+			    mt7921_mac_sta_update(sc, ic->ic_bss, 0, 0) : -1;
+			MWX_DEV_LOG(sc, "leave RUN teardown bss=%d sta=%d\n",
+			    td_bss, td_sta);
+		}
 		break;
 	case IEEE80211_S_SCAN:
 		if (nstate == ostate) {
