@@ -468,6 +468,8 @@ struct mwx_softc {
 	uint32_t		sc_rx_pkt_normal;
 	uint32_t		sc_rx_pkt_unknown;
 	uint32_t		sc_rx_fill_fail;
+	uint32_t		sc_last_rxd1;
+	uint32_t		sc_last_rxd2;
 	uint32_t		sc_rx_delivered;
 	uint32_t		sc_scan_done_count;
 	uint32_t		sc_scan_last_ieee80211_nodes;
@@ -1594,11 +1596,13 @@ mwx_rx(struct mwx_softc *sc, struct mbuf *m, struct mbuf_list *ml)
 		    (ic->ic_state == IEEE80211_S_RUN &&
 		    (rxi.rxi_flags & IEEE80211_RXI_HWDEC)))) {
 			MWX_DEV_LOG(sc,
-			    "rx run frame state=%d fc=%02x/%02x type=0x%02x subtype=0x%02x rxi_flags=0x%x chan=%u rssi=%d len=%zu a1=%s%s\n",
+			    "rx run frame state=%d fc=%02x/%02x type=0x%02x subtype=0x%02x rxi_flags=0x%x chan=%u rssi=%d len=%zu a1=%s%s rxd1=0x%08x rxd2=0x%08x wlan_idx=%u\n",
 			    ic->ic_state, wh->i_fc[0], wh->i_fc[1], type, subtype,
 			    rxi.rxi_flags, rxi.rxi_chan, rxi.rxi_rssi, mbuf_len(m),
 			    ether_sprintf(wh->i_addr1),
-			    IEEE80211_IS_MULTICAST(wh->i_addr1) ? " (group)" : "");
+			    IEEE80211_IS_MULTICAST(wh->i_addr1) ? " (group)" : "",
+			    sc->sc_last_rxd1, sc->sc_last_rxd2,
+			    sc->sc_last_rxd1 & MT_RXD1_NORMAL_WLAN_IDX_MASK);
 			rx_run_log_count++;
 		}
 	}
@@ -5218,6 +5222,8 @@ mt7921_mac_fill_rx(struct mwx_softc *sc, struct mbuf *m,
 	rxd2 = le32toh(rxd[2]);
 	rxd3 = le32toh(rxd[3]);
 	rxd4 = le32toh(rxd[4]);
+	sc->sc_last_rxd1 = rxd1;
+	sc->sc_last_rxd2 = rxd2;
 
 	if (rxd1 & MT_RXD1_NORMAL_BAND_IDX) {
 		MWX_RX_DROP_LOG(sc, "band-idx", -1, rxd0, rxd1, rxd2,
