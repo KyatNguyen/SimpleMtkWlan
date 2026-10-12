@@ -6471,6 +6471,7 @@ MtkMwx::attach(IOPCIDevice *device)
 	    (void *)com, (void *)pci);
 
 	if (!taskq_init()) {
+		MWX_LOG("HAL attach failed: taskq_init\n");
 		releaseAll();
 		return false;
 	}
