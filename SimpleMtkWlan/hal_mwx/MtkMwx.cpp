@@ -6300,7 +6300,22 @@ mt7921_mac_sta_update(struct mwx_softc *sc, struct ieee80211_node *ni,
 	if (m == NULL)
 		return ENOBUFS;
 
-	return mwx_mcu_send_mbuf_wait(sc, MCU_UNI_CMD_STA_REC_UPDATE, m);
+	{
+		/* Diagnostic: report transport and firmware status. */
+		int seq, rv;
+		uint32_t status = 0;
+
+		rv = mwx_mcu_send_mbuf(sc, MCU_UNI_CMD_STA_REC_UPDATE, m, &seq);
+		if (rv == 0)
+			rv = mwx_mcu_wait_resp_int(sc,
+			    MCU_UNI_CMD_STA_REC_UPDATE, seq, &status);
+		MWX_DEV_LOG(sc, "sta_update wcid=%u add=%d isnew=%d mac=%s "
+		    "tlv=%u wtbl_tlv=%u transport=%d firmware=%u\n",
+		    mw ? mw->wcid : 0, add, isnew,
+		    ni ? ether_sprintf(ni->ni_macaddr) : "-", tlvnum, wnum,
+		    rv, status);
+		return rv ? rv : (status ? EIO : 0);
+	}
 }
 
 static int
