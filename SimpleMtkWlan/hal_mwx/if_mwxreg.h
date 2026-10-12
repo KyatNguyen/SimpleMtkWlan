@@ -1327,6 +1327,14 @@ struct sta_rec_ra_info {
 #define	RA_LEGACY_OFDM	0x3fc0
 #define	RA_LEGACY_CCK	0x000f
 
+#define	STA_REC_HT			0x09
+struct sta_rec_ht {
+	uint16_t	tag;
+	uint16_t	len;
+	uint16_t	ht_cap;
+	uint16_t	rsv;
+} __packed;
+
 #define	STA_REC_STATE			0x07
 struct sta_rec_state {
 	uint16_t	tag;
@@ -1431,6 +1439,17 @@ struct wtbl_rx {
 	uint8_t		rca1;
 	uint8_t		rca2;
 	uint8_t		rv;
+	uint8_t		rsv[4];
+} __packed;
+
+#define	WTBL_HT				0x02
+struct wtbl_ht {
+	uint16_t	tag;
+	uint16_t	len;
+	uint8_t		ht;
+	uint8_t		ldpc;
+	uint8_t		af;
+	uint8_t		mm;
 	uint8_t		rsv[4];
 } __packed;
 
@@ -1578,6 +1597,13 @@ enum mt76_phy_type {
 #define	PHY_TYPE_BIT_ERP		(1U << 1)
 #define	PHY_TYPE_BIT_OFDM		(1U << 3)
 #define	PHY_TYPE_BIT_HT			(1U << 4)
+
+/* BSS_INFO_BASIC phymode bits */
+#define	PHY_MODE_A			(1U << 0)
+#define	PHY_MODE_B			(1U << 1)
+#define	PHY_MODE_G			(1U << 2)
+#define	PHY_MODE_GN			(1U << 3)
+#define	PHY_MODE_AN			(1U << 4)
 #define	PHY_TYPE_BIT_VHT		(1U << 5)
 #define	PHY_TYPE_BIT_HE			(1U << 6)
 

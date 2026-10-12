@@ -132,7 +132,6 @@ int
 ieee80211_output(struct _ifnet *ifp, mbuf_t m, struct sockaddr *dst,
     struct rtentry *rt)
 {
-    XYLog("%s 啊啊啊啊\n", __FUNCTION__);
 	struct ieee80211_frame *wh;
 	struct m_tag *mtag;
 	int error = 0;
