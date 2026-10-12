@@ -46,6 +46,9 @@
 
 #include "if_mwxreg.h"
 
+/* Diagnostic build: route driver printf through IOLog so it reaches the unified log. */
+#define printf IOLog
+
 OSDefineMetaClassAndStructors(MtkMwx, MtkHalService)
 
 #ifndef NBPFILTER
